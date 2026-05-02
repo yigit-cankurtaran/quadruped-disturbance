@@ -44,6 +44,17 @@ class RandomPushConfig:
 
 
 @dataclass(frozen=True)
+class ResetRandomizationConfig:
+    enabled: bool = False
+    base_xy_range_m: float = 0.02
+    base_yaw_range_rad: float = 0.05
+    root_velocity_range: float = 0.05
+    joint_position_range_rad: float = 0.03
+    joint_velocity_range: float = 0.2
+    randomize_gait_phase: bool = True
+
+
+@dataclass(frozen=True)
 class RewardConfig:
     velocity_tracking_weight: float = 1.0
     velocity_tracking_sigma: float = 0.35
@@ -65,11 +76,15 @@ class Go1RLEnvConfig:
     max_episode_time_s: float = 10.0
     command_velocity_x: float = 0.6
     command_velocity_range: tuple[float, float] = (-1.0, 2.0)
+    randomize_command_velocity: bool = False
     target_height: float = 0.27
     min_base_height: float = 0.16
     max_abs_roll_pitch_rad: float = math.radians(55.0)
     reward: RewardConfig = field(default_factory=RewardConfig)
     random_pushes: RandomPushConfig = field(default_factory=RandomPushConfig)
+    reset_randomization: ResetRandomizationConfig = field(
+        default_factory=ResetRandomizationConfig
+    )
 
 
 class Go1TrotRLEnv(gym.Env[np.ndarray, np.ndarray]):
@@ -79,8 +94,7 @@ class Go1TrotRLEnv(gym.Env[np.ndarray, np.ndarray]):
 
     def __init__(self, config: Go1RLEnvConfig | None = None) -> None:
         self.config = config or Go1RLEnvConfig()
-        if self.config.decimation < 1:
-            raise ValueError("decimation must be >= 1")
+        self._validate_config()
 
         self.physics = Go1Env(model_path=self.config.model_path)
         self.model = self.physics.model
@@ -121,8 +135,9 @@ class Go1TrotRLEnv(gym.Env[np.ndarray, np.ndarray]):
         super().reset(seed=seed)
         self.physics.reset()
         self._previous_action.fill(0.0)
-        self._episode_start_time = float(self.data.time)
         self._command_velocity_x = self._command_velocity_from_options(options)
+        self._apply_reset_randomization()
+        self._episode_start_time = float(self.data.time)
         self._push_force.fill(0.0)
         self._push_end_time = -math.inf
         self.physics.clear_push()
@@ -163,6 +178,53 @@ class Go1TrotRLEnv(gym.Env[np.ndarray, np.ndarray]):
 
     def close(self) -> None:
         self.physics.clear_push()
+
+    def _validate_config(self) -> None:
+        if self.config.decimation < 1:
+            raise ValueError("decimation must be >= 1")
+        if self.config.action_scale < 0.0:
+            raise ValueError("action_scale must be >= 0")
+        if self.config.max_episode_time_s <= 0.0:
+            raise ValueError("max_episode_time_s must be > 0")
+        if self.config.target_height <= 0.0:
+            raise ValueError("target_height must be > 0")
+        if self.config.min_base_height <= 0.0:
+            raise ValueError("min_base_height must be > 0")
+        if self.config.max_abs_roll_pitch_rad <= 0.0:
+            raise ValueError("max_abs_roll_pitch_rad must be > 0")
+
+        command_low, command_high = self.config.command_velocity_range
+        if command_low > command_high:
+            raise ValueError("command_velocity_range must be ordered low <= high")
+
+        self._validate_random_push_config(self.config.random_pushes)
+        self._validate_reset_randomization_config(self.config.reset_randomization)
+
+    @staticmethod
+    def _validate_random_push_config(config: RandomPushConfig) -> None:
+        ranges = {
+            "interval": (config.min_interval_s, config.max_interval_s),
+            "duration": (config.min_duration_s, config.max_duration_s),
+            "force": (config.min_force_n, config.max_force_n),
+        }
+        for name, (low, high) in ranges.items():
+            if low < 0.0 or high < 0.0:
+                raise ValueError(f"random push {name} range must be non-negative")
+            if low > high:
+                raise ValueError(f"random push {name} range must be ordered low <= high")
+
+    @staticmethod
+    def _validate_reset_randomization_config(config: ResetRandomizationConfig) -> None:
+        values = {
+            "base_xy_range_m": config.base_xy_range_m,
+            "base_yaw_range_rad": config.base_yaw_range_rad,
+            "root_velocity_range": config.root_velocity_range,
+            "joint_position_range_rad": config.joint_position_range_rad,
+            "joint_velocity_range": config.joint_velocity_range,
+        }
+        for name, value in values.items():
+            if value < 0.0:
+                raise ValueError(f"{name} must be >= 0")
 
     def _validate_model_layout(self) -> None:
         if self.model.nu != N_ACTUATORS:
@@ -245,8 +307,65 @@ class Go1TrotRLEnv(gym.Env[np.ndarray, np.ndarray]):
         command = self.config.command_velocity_x
         if options is not None and "command_velocity_x" in options:
             command = float(options["command_velocity_x"])
+        elif self.config.randomize_command_velocity:
+            low, high = self.config.command_velocity_range
+            command = float(self.np_random.uniform(low, high))
         low, high = self.config.command_velocity_range
         return float(np.clip(command, low, high))
+
+    def _apply_reset_randomization(self) -> None:
+        config = self.config.reset_randomization
+        if not config.enabled:
+            return
+
+        if config.base_xy_range_m > 0.0:
+            self.data.qpos[0:2] += self.np_random.uniform(
+                -config.base_xy_range_m,
+                config.base_xy_range_m,
+                size=2,
+            )
+
+        if config.base_yaw_range_rad > 0.0:
+            yaw = float(
+                self.np_random.uniform(-config.base_yaw_range_rad, config.base_yaw_range_rad)
+            )
+            half_yaw = 0.5 * yaw
+            self.data.qpos[3:7] = np.array(
+                [math.cos(half_yaw), 0.0, 0.0, math.sin(half_yaw)],
+                dtype=np.float64,
+            )
+
+        if config.joint_position_range_rad > 0.0:
+            joint_noise = self.np_random.uniform(
+                -config.joint_position_range_rad,
+                config.joint_position_range_rad,
+                size=N_ACTUATORS,
+            )
+            self.data.qpos[self._joint_qpos_adrs] = np.clip(
+                self.data.qpos[self._joint_qpos_adrs] + joint_noise,
+                self._joint_pos_low,
+                self._joint_pos_high,
+            )
+
+        if config.root_velocity_range > 0.0:
+            self.data.qvel[:ROOT_QVEL_SIZE] = self.np_random.uniform(
+                -config.root_velocity_range,
+                config.root_velocity_range,
+                size=ROOT_QVEL_SIZE,
+            )
+
+        if config.joint_velocity_range > 0.0:
+            self.data.qvel[self._joint_qvel_adrs] = self.np_random.uniform(
+                -config.joint_velocity_range,
+                config.joint_velocity_range,
+                size=N_ACTUATORS,
+            )
+
+        if config.randomize_gait_phase and self.config.gait.frequency_hz > 0.0:
+            period_s = 1.0 / self.config.gait.frequency_hz
+            self.data.time = float(self.np_random.uniform(0.0, period_s))
+
+        mujoco.mj_forward(self.model, self.data)
 
     def _gait_phase(self, time_s: float) -> float:
         return 2.0 * math.pi * self.config.gait.frequency_hz * time_s

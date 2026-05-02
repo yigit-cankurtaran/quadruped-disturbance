@@ -4,7 +4,12 @@ import mujoco
 import numpy as np
 
 from quadruped_demo.gait import N_ACTUATORS
-from quadruped_demo.rl_env import Go1RLEnvConfig, Go1TrotRLEnv, RandomPushConfig
+from quadruped_demo.rl_env import (
+    Go1RLEnvConfig,
+    Go1TrotRLEnv,
+    RandomPushConfig,
+    ResetRandomizationConfig,
+)
 
 
 def test_rl_env_reset_observation_is_in_space() -> None:
@@ -80,3 +85,42 @@ def test_rl_env_random_pushes_apply_external_force() -> None:
     _, _, _, _, info = env.step(np.zeros(N_ACTUATORS, dtype=np.float32))
 
     assert np.isclose(np.linalg.norm(info["push_force"]), 5.0)
+
+
+def test_rl_env_reset_randomization_is_seeded_and_in_bounds() -> None:
+    config = Go1RLEnvConfig(
+        command_velocity_range=(0.2, 0.4),
+        randomize_command_velocity=True,
+        reset_randomization=ResetRandomizationConfig(enabled=True),
+    )
+    env = Go1TrotRLEnv(config)
+
+    obs_a, info_a = env.reset(seed=123)
+    qpos_a = env.data.qpos.copy()
+    qvel_a = env.data.qvel.copy()
+    obs_b, info_b = env.reset(seed=123)
+
+    assert np.allclose(obs_a, obs_b)
+    assert np.allclose(qpos_a, env.data.qpos)
+    assert np.allclose(qvel_a, env.data.qvel)
+    assert 0.2 <= info_a["command_velocity_x"] <= 0.4
+    assert info_a["command_velocity_x"] == info_b["command_velocity_x"]
+    assert env.observation_space.contains(obs_a)
+
+
+def test_rl_env_rejects_invalid_training_ranges() -> None:
+    bad_command = Go1RLEnvConfig(command_velocity_range=(1.0, -1.0))
+    bad_push = Go1RLEnvConfig(
+        random_pushes=RandomPushConfig(enabled=True, min_force_n=10.0, max_force_n=5.0)
+    )
+    bad_reset = Go1RLEnvConfig(
+        reset_randomization=ResetRandomizationConfig(enabled=True, joint_velocity_range=-0.1)
+    )
+
+    for config in (bad_command, bad_push, bad_reset):
+        try:
+            Go1TrotRLEnv(config)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("invalid config should raise ValueError")

@@ -75,6 +75,10 @@ episode time.
 Random push disturbances are available through "RandomPushConfig" for training or
 evaluation. The original visual demo push behavior remains in "run_controller".
 
+Training defaults add mild reset randomization and command velocity sampling so PPO
+does not only see one initial state and one requested speed. Push disturbances are
+available as a training flag instead of being forced on from the first run.
+
 ## Random RL Rollout
 
 Run the Gymnasium env with random residual actions:
@@ -89,10 +93,50 @@ With viewer and randomized pushes:
 uv run mjpython scripts/run_rl_random.py --pushes
 ```
 
+## PPO Training
+
+Stable-Baselines3 PPO is wired through `quadruped_demo.training` and the CLI scripts
+below. A short smoke run:
+
+```bash
+uv run python scripts/train_ppo.py --total-timesteps 1024 --n-steps 128 --batch-size 64
+```
+
+The default output directory is `results/ppo/go1_ppo/` and contains:
+
+- `model.zip`
+- `vecnormalize.pkl`
+- monitor logs
+
+Watch the default trained checkpoint:
+
+```bash
+uv run mjpython scripts/watch_ppo.py
+```
+
+Evaluate a trained checkpoint headlessly:
+
+```bash
+uv run python scripts/evaluate_ppo.py \
+  --model results/ppo/go1_ppo/model.zip \
+  --vecnormalize results/ppo/go1_ppo/vecnormalize.pkl \
+  --duration 5 \
+  --no-viewer
+```
+
+For visual evaluation, use `mjpython` and omit `--no-viewer`:
+
+```bash
+uv run mjpython scripts/evaluate_ppo.py \
+  --model results/ppo/go1_ppo/model.zip \
+  --vecnormalize results/ppo/go1_ppo/vecnormalize.pkl
+```
+
+Add `--pushes` to train or evaluate with randomized push disturbances.
+
 ## Development
 
 ```bash
 uv run ruff check .
 uv run pytest
 ```
-
