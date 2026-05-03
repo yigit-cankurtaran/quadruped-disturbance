@@ -10,6 +10,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecEnv, VecNormalize
 
 from quadruped_demo.paths import RESULTS_DIR
 from quadruped_demo.training import default_training_env_config, load_eval_vec_env
+from quadruped_demo.viewer_markers import draw_push_arrow
 
 
 def _go1_env_from_vec_env(vec_env: VecEnv):
@@ -73,6 +74,12 @@ def main() -> None:
             total_time += go1_env.dt
 
             if viewer is not None:
+                with viewer.lock():
+                    draw_push_arrow(
+                        viewer.user_scn,
+                        go1_env.data.xipos[go1_env.physics.trunk_id],
+                        infos[0]["push_force"],
+                    )
                 viewer.sync()
                 elapsed = time.time() - start
                 if total_time > elapsed:

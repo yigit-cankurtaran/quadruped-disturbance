@@ -114,6 +114,13 @@ Watch the default trained checkpoint:
 uv run mjpython scripts/watch_ppo.py
 ```
 
+When `--pushes` is enabled, the watch viewer draws a red arrow into the trunk while
+a randomized push disturbance is active:
+
+```bash
+uv run mjpython scripts/watch_ppo.py --pushes
+```
+
 Evaluate a trained checkpoint headlessly:
 
 ```bash
