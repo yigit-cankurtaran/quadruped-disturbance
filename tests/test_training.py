@@ -25,19 +25,31 @@ def test_tiny_ppo_training_saves_model_and_normalizer(tmp_path) -> None:
     result = train_ppo(
         PPOTrainingConfig(
             total_timesteps=8,
+            n_envs=1,
             n_steps=4,
             batch_size=4,
             n_epochs=1,
             verbose=0,
             run_name="ppo_smoke",
+            checkpoint_freq=4,
+            eval_freq=4,
+            n_eval_episodes=1,
         ),
         env_config=env_config,
+        eval_env_config=env_config,
         output_dir=tmp_path,
     )
 
     assert result.model_path.exists()
     assert result.vecnormalize_path is not None
     assert result.vecnormalize_path.exists()
+    assert result.best_model_path is not None
+    assert result.best_model_path.exists()
+    assert result.best_vecnormalize_path is not None
+    assert result.best_vecnormalize_path.exists()
+    assert result.checkpoint_dir.exists()
+    assert list(result.checkpoint_dir.glob("*.zip"))
+    assert list(result.checkpoint_dir.glob("*vecnormalize*.pkl"))
 
     eval_env = load_eval_vec_env(env_config, seed=0, vecnormalize_path=result.vecnormalize_path)
     try:

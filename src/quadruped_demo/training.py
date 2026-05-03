@@ -5,6 +5,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from stable_baselines3 import PPO
+from stable_baselines3.common.callbacks import (
+    BaseCallback,
+    CallbackList,
+    CheckpointCallback,
+    EvalCallback,
+)
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, VecEnv, VecNormalize
 
@@ -21,7 +27,7 @@ from quadruped_demo.rl_env import (
 class PPOTrainingConfig:
     total_timesteps: int = 200_000
     seed: int = 0
-    n_envs: int = 1
+    n_envs: int = 4
     learning_rate: float = 3e-4
     n_steps: int = 512
     batch_size: int = 64
@@ -36,6 +42,9 @@ class PPOTrainingConfig:
     normalize: bool = True
     verbose: int = 1
     run_name: str = "go1_ppo"
+    checkpoint_freq: int = 50_000
+    eval_freq: int = 10_000
+    n_eval_episodes: int = 5
 
 
 @dataclass(frozen=True)
@@ -43,6 +52,9 @@ class PPOTrainingResult:
     run_dir: Path
     model_path: Path
     vecnormalize_path: Path | None
+    best_model_path: Path | None
+    best_vecnormalize_path: Path | None
+    checkpoint_dir: Path
 
 
 def default_training_env_config(pushes: bool = False) -> Go1RLEnvConfig:
@@ -71,6 +83,40 @@ def default_training_env_config(pushes: bool = False) -> Go1RLEnvConfig:
             randomize_gait_phase=True,
         ),
     )
+
+
+def default_eval_env_config(pushes: bool = False) -> Go1RLEnvConfig:
+    return Go1RLEnvConfig(
+        max_episode_time_s=8.0,
+        command_velocity_x=0.6,
+        command_velocity_range=(0.6, 0.6),
+        randomize_command_velocity=False,
+        action_scale=0.18,
+        random_pushes=RandomPushConfig(
+            enabled=pushes,
+            min_interval_s=2.5,
+            max_interval_s=2.5,
+            min_duration_s=0.08,
+            max_duration_s=0.08,
+            min_force_n=20.0,
+            max_force_n=20.0,
+        ),
+        reset_randomization=ResetRandomizationConfig(enabled=False),
+    )
+
+
+class SaveVecNormalizeCallback(BaseCallback):
+    def __init__(self, save_path: Path, verbose: int = 0) -> None:
+        super().__init__(verbose=verbose)
+        self.save_path = save_path
+
+    def _on_step(self) -> bool:
+        vec_normalize = self.model.get_vec_normalize_env()
+        if vec_normalize is None:
+            return True
+        self.save_path.parent.mkdir(parents=True, exist_ok=True)
+        vec_normalize.save(str(self.save_path))
+        return True
 
 
 def make_env(
@@ -152,9 +198,89 @@ def create_ppo_model(vec_env: VecEnv, config: PPOTrainingConfig) -> PPO:
     )
 
 
+def save_model_artifacts(
+    model: PPO,
+    model_path: Path,
+    vecnormalize_path: Path | None,
+) -> None:
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    model.save(str(model_path))
+
+    vec_normalize = model.get_vec_normalize_env()
+    if vecnormalize_path is not None and vec_normalize is not None:
+        vecnormalize_path.parent.mkdir(parents=True, exist_ok=True)
+        vec_normalize.save(str(vecnormalize_path))
+
+
+def _callback_freq(freq_timesteps: int, n_envs: int) -> int:
+    return max(freq_timesteps // max(n_envs, 1), 1)
+
+
+def build_training_callbacks(
+    config: PPOTrainingConfig,
+    env_config: Go1RLEnvConfig,
+    run_dir: Path,
+    eval_env_config: Go1RLEnvConfig | None = None,
+) -> tuple[CallbackList | None, VecEnv | None, Path | None, Path | None, Path]:
+    checkpoint_dir = run_dir / "checkpoints"
+    callbacks: list[BaseCallback] = []
+
+    if config.checkpoint_freq > 0:
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        callbacks.append(
+            CheckpointCallback(
+                save_freq=_callback_freq(config.checkpoint_freq, config.n_envs),
+                save_path=str(checkpoint_dir),
+                name_prefix="ppo_go1",
+                save_vecnormalize=config.normalize,
+                verbose=max(config.verbose - 1, 0),
+            )
+        )
+
+    eval_env = None
+    best_model_path = None
+    best_vecnormalize_path = None
+    if config.eval_freq > 0 and config.n_eval_episodes > 0:
+        best_dir = run_dir / "best"
+        best_model_path = best_dir / "best_model.zip"
+        best_vecnormalize_path = best_dir / "best_vecnormalize.pkl" if config.normalize else None
+        eval_env = build_vec_env(
+            eval_env_config or env_config,
+            seed=config.seed + 10_000,
+            n_envs=1,
+            monitor_dir=run_dir / "eval_monitor",
+            normalize=config.normalize,
+        )
+        callbacks.append(
+            EvalCallback(
+                eval_env=eval_env,
+                best_model_save_path=str(best_dir),
+                log_path=str(run_dir / "eval"),
+                eval_freq=_callback_freq(config.eval_freq, config.n_envs),
+                n_eval_episodes=config.n_eval_episodes,
+                deterministic=True,
+                callback_on_new_best=SaveVecNormalizeCallback(best_vecnormalize_path)
+                if best_vecnormalize_path is not None
+                else None,
+                verbose=max(config.verbose - 1, 0),
+            )
+        )
+
+    if not callbacks:
+        return None, eval_env, best_model_path, best_vecnormalize_path, checkpoint_dir
+    return (
+        CallbackList(callbacks),
+        eval_env,
+        best_model_path,
+        best_vecnormalize_path,
+        checkpoint_dir,
+    )
+
+
 def train_ppo(
     config: PPOTrainingConfig,
     env_config: Go1RLEnvConfig | None = None,
+    eval_env_config: Go1RLEnvConfig | None = None,
     output_dir: Path | None = None,
 ) -> PPOTrainingResult:
     if config.total_timesteps < 1:
@@ -167,30 +293,57 @@ def train_ppo(
     run_dir = (output_dir or RESULTS_DIR / "ppo") / config.run_name
     monitor_dir = run_dir / "monitor"
     run_dir.mkdir(parents=True, exist_ok=True)
+    resolved_env_config = env_config or default_training_env_config()
 
     vec_env = build_vec_env(
-        env_config or default_training_env_config(),
+        resolved_env_config,
         seed=config.seed,
         n_envs=config.n_envs,
         monitor_dir=monitor_dir,
         normalize=config.normalize,
     )
+    callbacks, eval_env, best_model_path, best_vecnormalize_path, checkpoint_dir = (
+        build_training_callbacks(
+            config=config,
+            env_config=resolved_env_config,
+            eval_env_config=eval_env_config,
+            run_dir=run_dir,
+        )
+    )
+    model: PPO | None = None
     try:
         model = create_ppo_model(vec_env, config)
-        model.learn(total_timesteps=config.total_timesteps)
+        model.learn(total_timesteps=config.total_timesteps, callback=callbacks)
 
         model_path = run_dir / "model.zip"
-        model.save(str(model_path))
-
-        vecnormalize_path = None
-        if isinstance(vec_env, VecNormalize):
-            vecnormalize_path = run_dir / "vecnormalize.pkl"
-            vec_env.save(str(vecnormalize_path))
+        vecnormalize_path = (
+            run_dir / "vecnormalize.pkl" if isinstance(vec_env, VecNormalize) else None
+        )
+        save_model_artifacts(model, model_path, vecnormalize_path)
 
         return PPOTrainingResult(
             run_dir=run_dir,
             model_path=model_path,
             vecnormalize_path=vecnormalize_path,
+            best_model_path=best_model_path
+            if best_model_path and best_model_path.exists()
+            else None,
+            best_vecnormalize_path=best_vecnormalize_path
+            if best_vecnormalize_path and best_vecnormalize_path.exists()
+            else None,
+            checkpoint_dir=checkpoint_dir,
         )
+    except KeyboardInterrupt:
+        if model is not None:
+            model_path = run_dir / "interrupted_model.zip"
+            vecnormalize_path = (
+                run_dir / "interrupted_vecnormalize.pkl"
+                if isinstance(vec_env, VecNormalize)
+                else None
+            )
+            save_model_artifacts(model, model_path, vecnormalize_path)
+        raise
     finally:
+        if eval_env is not None:
+            eval_env.close()
         vec_env.close()

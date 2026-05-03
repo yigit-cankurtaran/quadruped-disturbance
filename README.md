@@ -97,7 +97,7 @@ uv run mjpython scripts/run_rl_random.py --pushes
 ## PPO Training
 
 Stable-Baselines3 PPO is wired through `quadruped_demo.training` and the CLI scripts
-below. A short smoke run:
+below. Training uses 4 vectorized envs by default. A short smoke run:
 
 ```bash
 uv run python scripts/train_ppo.py --total-timesteps 1024 --n-steps 128 --batch-size 64
@@ -105,11 +105,16 @@ uv run python scripts/train_ppo.py --total-timesteps 1024 --n-steps 128 --batch-
 
 The default output directory is `results/ppo/go1_ppo/` and contains:
 
-- `model.zip`
-- `vecnormalize.pkl`
+- `model.zip` and `vecnormalize.pkl` for the final completed model
+- `best/best_model.zip` and `best/best_vecnormalize.pkl` from periodic evaluation
+- `checkpoints/` for periodic model and VecNormalize snapshots
 - monitor logs
 
-Watch the default trained checkpoint:
+If training is interrupted with Ctrl-C, `interrupted_model.zip` and
+`interrupted_vecnormalize.pkl` are saved before the script exits.
+
+Watch the default trained checkpoint. The script uses `best/best_model.zip` when it
+exists and falls back to the final `model.zip` otherwise:
 
 ```bash
 uv run mjpython scripts/watch_ppo.py
