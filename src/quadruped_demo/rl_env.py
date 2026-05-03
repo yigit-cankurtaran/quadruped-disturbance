@@ -58,6 +58,9 @@ class ResetRandomizationConfig:
 class RewardConfig:
     velocity_tracking_weight: float = 1.0
     velocity_tracking_sigma: float = 0.35
+    straight_line_weight: float = 0.3
+    straight_line_sigma: float = 0.25
+    lateral_velocity_weight: float = 0.1
     alive_weight: float = 0.5
     height_weight: float = 0.4
     height_sigma: float = 0.05
@@ -117,6 +120,7 @@ class Go1TrotRLEnv(gym.Env[np.ndarray, np.ndarray]):
 
         self._previous_action = np.zeros(N_ACTUATORS, dtype=np.float64)
         self._episode_start_time = 0.0
+        self._episode_start_y = float(self.data.qpos[1])
         self._command_velocity_x = self.config.command_velocity_x
         self._push_force = np.zeros(3, dtype=np.float64)
         self._next_push_time = math.inf
@@ -138,6 +142,7 @@ class Go1TrotRLEnv(gym.Env[np.ndarray, np.ndarray]):
         self._command_velocity_x = self._command_velocity_from_options(options)
         self._apply_reset_randomization()
         self._episode_start_time = float(self.data.time)
+        self._episode_start_y = float(self.data.qpos[1])
         self._push_force.fill(0.0)
         self._push_end_time = -math.inf
         self.physics.clear_push()
@@ -256,6 +261,7 @@ class Go1TrotRLEnv(gym.Env[np.ndarray, np.ndarray]):
         low = np.concatenate(
             [
                 np.array([0.0], dtype=np.float32),
+                np.array([-np.inf], dtype=np.float32),
                 np.full(3, -1.0, dtype=np.float32),
                 np.full(6, -np.inf, dtype=np.float32),
                 self._joint_pos_low.astype(np.float32),
@@ -268,6 +274,7 @@ class Go1TrotRLEnv(gym.Env[np.ndarray, np.ndarray]):
         high = np.concatenate(
             [
                 np.array([2.0], dtype=np.float32),
+                np.array([np.inf], dtype=np.float32),
                 np.full(3, 1.0, dtype=np.float32),
                 np.full(6, np.inf, dtype=np.float32),
                 self._joint_pos_high.astype(np.float32),
@@ -287,6 +294,7 @@ class Go1TrotRLEnv(gym.Env[np.ndarray, np.ndarray]):
         obs = np.concatenate(
             [
                 np.array([qpos[2]], dtype=np.float64),
+                np.array([self._lateral_displacement()], dtype=np.float64),
                 self._projected_gravity(),
                 qvel[:ROOT_QVEL_SIZE],
                 qpos[self._joint_qpos_adrs],
@@ -370,6 +378,9 @@ class Go1TrotRLEnv(gym.Env[np.ndarray, np.ndarray]):
     def _gait_phase(self, time_s: float) -> float:
         return 2.0 * math.pi * self.config.gait.frequency_hz * time_s
 
+    def _lateral_displacement(self) -> float:
+        return float(self.data.qpos[1] - self._episode_start_y)
+
     def _projected_gravity(self) -> np.ndarray:
         quat = np.asarray(self.data.qpos[3:7], dtype=np.float64)
         rot = np.empty(9, dtype=np.float64)
@@ -395,6 +406,13 @@ class Go1TrotRLEnv(gym.Env[np.ndarray, np.ndarray]):
             )
         )
 
+        lateral_displacement = self._lateral_displacement()
+        straight_line = math.exp(
+            -(lateral_displacement * lateral_displacement)
+            / max(reward_config.straight_line_sigma * reward_config.straight_line_sigma, 1e-8)
+        )
+        lateral_velocity_penalty = float(self.data.qvel[1] * self.data.qvel[1])
+
         height_error = float(self.data.qpos[2]) - self.config.target_height
         height_reward = math.exp(
             -(height_error * height_error)
@@ -412,6 +430,10 @@ class Go1TrotRLEnv(gym.Env[np.ndarray, np.ndarray]):
 
         terms = {
             "velocity_tracking": reward_config.velocity_tracking_weight * velocity_tracking,
+            "straight_line": reward_config.straight_line_weight * straight_line,
+            "lateral_velocity_penalty": (
+                -reward_config.lateral_velocity_weight * lateral_velocity_penalty
+            ),
             "alive": reward_config.alive_weight * alive,
             "height": reward_config.height_weight * height_reward,
             "roll_pitch_penalty": -reward_config.roll_pitch_weight * roll_pitch_penalty,
@@ -483,6 +505,8 @@ class Go1TrotRLEnv(gym.Env[np.ndarray, np.ndarray]):
             "time": float(self.data.time),
             "command_velocity_x": self._command_velocity_x,
             "forward_velocity": float(self.data.qvel[0]),
+            "lateral_velocity": float(self.data.qvel[1]),
+            "lateral_displacement": self._lateral_displacement(),
             "base_height": float(self.data.qpos[2]),
             "roll": roll,
             "pitch": pitch,

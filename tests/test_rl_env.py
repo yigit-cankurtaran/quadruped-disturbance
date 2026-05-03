@@ -36,6 +36,9 @@ def test_rl_env_step_returns_gymnasium_tuple() -> None:
     assert isinstance(truncated, bool)
     assert "reward_terms" in info
     assert np.isfinite(reward)
+    assert "straight_line" in info["reward_terms"]
+    assert "lateral_velocity_penalty" in info["reward_terms"]
+    assert "lateral_displacement" in info
 
 
 def test_rl_env_random_actions_short_rollout_do_not_crash() -> None:
@@ -85,6 +88,27 @@ def test_rl_env_random_pushes_apply_external_force() -> None:
     _, _, _, _, info = env.step(np.zeros(N_ACTUATORS, dtype=np.float32))
 
     assert np.isclose(np.linalg.norm(info["push_force"]), 5.0)
+
+
+def test_rl_env_straight_line_reward_penalizes_sideways_drift() -> None:
+    env = Go1TrotRLEnv(Go1RLEnvConfig(decimation=1))
+    action = np.zeros(N_ACTUATORS, dtype=np.float32)
+
+    env.reset(seed=123)
+    _, _, _, _, centered_info = env.step(action)
+
+    env.reset(seed=123)
+    env.data.qpos[1] += 0.4
+    env.data.qvel[1] = 1.0
+    mujoco.mj_forward(env.model, env.data)
+    _, _, _, _, drifted_info = env.step(action)
+
+    assert drifted_info["reward_terms"]["straight_line"] < centered_info["reward_terms"][
+        "straight_line"
+    ]
+    assert drifted_info["reward_terms"]["lateral_velocity_penalty"] < centered_info[
+        "reward_terms"
+    ]["lateral_velocity_penalty"]
 
 
 def test_rl_env_reset_randomization_is_seeded_and_in_bounds() -> None:
