@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import (
@@ -12,7 +13,7 @@ from stable_baselines3.common.callbacks import (
     EvalCallback,
 )
 from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.vec_env import DummyVecEnv, VecEnv, VecNormalize
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecEnv, VecNormalize
 
 from quadruped_demo.paths import RESULTS_DIR
 from quadruped_demo.rl_env import (
@@ -21,6 +22,8 @@ from quadruped_demo.rl_env import (
     RandomPushConfig,
     ResetRandomizationConfig,
 )
+
+VecEnvType = Literal["auto", "dummy", "subproc"]
 
 
 @dataclass(frozen=True)
@@ -42,6 +45,7 @@ class PPOTrainingConfig:
     normalize: bool = True
     verbose: int = 1
     run_name: str = "go1_ppo"
+    vec_env_type: VecEnvType = "auto"
     checkpoint_freq: int = 50_000
     eval_freq: int = 10_000
     n_eval_episodes: int = 5
@@ -136,12 +140,21 @@ def make_env(
     return _init
 
 
+def _resolve_vec_env_type(n_envs: int, vec_env_type: VecEnvType) -> VecEnvType:
+    if vec_env_type == "auto":
+        return "subproc" if n_envs > 1 else "dummy"
+    if vec_env_type not in ("dummy", "subproc"):
+        raise ValueError("vec_env_type must be one of: auto, dummy, subproc")
+    return vec_env_type
+
+
 def build_vec_env(
     env_config: Go1RLEnvConfig,
     seed: int,
     n_envs: int,
     monitor_dir: Path | None = None,
     normalize: bool = True,
+    vec_env_type: VecEnvType = "auto",
 ) -> VecEnv:
     if n_envs < 1:
         raise ValueError("n_envs must be >= 1")
@@ -153,7 +166,12 @@ def build_vec_env(
         make_env(env_config, seed=seed, rank=rank, monitor_dir=monitor_dir)
         for rank in range(n_envs)
     ]
-    vec_env: VecEnv = DummyVecEnv(env_fns)
+    resolved_vec_env_type = _resolve_vec_env_type(n_envs, vec_env_type)
+    if resolved_vec_env_type == "subproc":
+        vec_env: VecEnv = SubprocVecEnv(env_fns)
+    else:
+        vec_env = DummyVecEnv(env_fns)
+
     if normalize:
         vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True, clip_obs=10.0)
     return vec_env
@@ -170,6 +188,7 @@ def load_eval_vec_env(
         n_envs=1,
         monitor_dir=None,
         normalize=False,
+        vec_env_type="dummy",
     )
     if vecnormalize_path is not None:
         vec_env = VecNormalize.load(str(vecnormalize_path), vec_env)
@@ -301,6 +320,7 @@ def train_ppo(
         n_envs=config.n_envs,
         monitor_dir=monitor_dir,
         normalize=config.normalize,
+        vec_env_type=config.vec_env_type,
     )
     callbacks, eval_env, best_model_path, best_vecnormalize_path, checkpoint_dir = (
         build_training_callbacks(

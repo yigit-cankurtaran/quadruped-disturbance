@@ -98,7 +98,9 @@ uv run mjpython scripts/run_rl_random.py --pushes
 ## PPO Training
 
 Stable-Baselines3 PPO is wired through `quadruped_demo.training` and the CLI scripts
-below. Training uses 4 vectorized envs by default. A short smoke run:
+below. Training uses 4 vectorized envs by default. The default vector backend is
+`auto`: it uses `SubprocVecEnv` for multi-env training and `DummyVecEnv` for a single
+env. Use `--vec-env dummy` to force simpler single-process stepping. A short smoke run:
 
 ```bash
 uv run python scripts/train_ppo.py --total-timesteps 1024 --n-steps 128 --batch-size 64

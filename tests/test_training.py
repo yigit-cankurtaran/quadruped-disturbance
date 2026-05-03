@@ -2,14 +2,20 @@ from __future__ import annotations
 
 import numpy as np
 from stable_baselines3.common.env_checker import check_env
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecEnv, VecNormalize
 
 from quadruped_demo.rl_env import Go1RLEnvConfig, Go1TrotRLEnv
 from quadruped_demo.training import (
     PPOTrainingConfig,
+    build_vec_env,
     default_training_env_config,
     load_eval_vec_env,
     train_ppo,
 )
+
+
+def _base_vec_env(vec_env: VecEnv) -> VecEnv:
+    return vec_env.venv if isinstance(vec_env, VecNormalize) else vec_env
 
 
 def test_sb3_env_checker_accepts_go1_env() -> None:
@@ -18,6 +24,32 @@ def test_sb3_env_checker_accepts_go1_env() -> None:
         check_env(env, warn=True, skip_render_check=True)
     finally:
         env.close()
+
+
+def test_build_vec_env_auto_uses_dummy_for_single_env() -> None:
+    vec_env = build_vec_env(
+        Go1RLEnvConfig(max_episode_time_s=0.2),
+        seed=0,
+        n_envs=1,
+        normalize=False,
+    )
+    try:
+        assert isinstance(_base_vec_env(vec_env), DummyVecEnv)
+    finally:
+        vec_env.close()
+
+
+def test_build_vec_env_auto_uses_subproc_for_multiple_envs() -> None:
+    vec_env = build_vec_env(
+        Go1RLEnvConfig(max_episode_time_s=0.2),
+        seed=0,
+        n_envs=2,
+        normalize=False,
+    )
+    try:
+        assert isinstance(_base_vec_env(vec_env), SubprocVecEnv)
+    finally:
+        vec_env.close()
 
 
 def test_tiny_ppo_training_saves_model_and_normalizer(tmp_path) -> None:

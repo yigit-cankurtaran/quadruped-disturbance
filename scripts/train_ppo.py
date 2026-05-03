@@ -26,6 +26,12 @@ def main() -> None:
     parser.add_argument("--device", default="auto")
     parser.add_argument("--run-name", default="go1_ppo")
     parser.add_argument("--output-dir", type=Path, default=RESULTS_DIR / "ppo")
+    parser.add_argument(
+        "--vec-env",
+        choices=("auto", "dummy", "subproc"),
+        default="auto",
+        help="Vector env backend. auto uses SubprocVecEnv when --n-envs > 1.",
+    )
     parser.add_argument("--no-normalize", action="store_true")
     parser.add_argument(
         "--pushes",
@@ -45,6 +51,7 @@ def main() -> None:
             device=args.device,
             normalize=not args.no_normalize,
             run_name=args.run_name,
+            vec_env_type=args.vec_env,
             checkpoint_freq=args.checkpoint_freq,
             eval_freq=args.eval_freq,
             n_eval_episodes=args.n_eval_episodes,
