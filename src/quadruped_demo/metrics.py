@@ -36,6 +36,22 @@ def base_roll_pitch(qpos: np.ndarray) -> tuple[float, float]:
     return roll, pitch
 
 
+def wrap_angle(angle: float) -> float:
+    return math.atan2(math.sin(angle), math.cos(angle))
+
+
+def base_yaw(qpos: np.ndarray) -> float:
+    """Return floating-base yaw in radians from MuJoCo qpos."""
+
+    qw, qx, qy, qz = np.asarray(qpos[3:7], dtype=np.float64)
+    norm = math.sqrt(qw * qw + qx * qx + qy * qy + qz * qz)
+    if norm == 0.0:
+        raise ValueError("Base orientation quaternion has zero norm.")
+
+    qw, qx, qy, qz = qw / norm, qx / norm, qy / norm, qz / norm
+    return math.atan2(2.0 * (qw * qz + qx * qy), 1.0 - 2.0 * (qy * qy + qz * qz))
+
+
 def is_upright(
     qpos: np.ndarray,
     min_height: float = 0.18,

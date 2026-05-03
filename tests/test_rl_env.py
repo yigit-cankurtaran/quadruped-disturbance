@@ -38,7 +38,12 @@ def test_rl_env_step_returns_gymnasium_tuple() -> None:
     assert np.isfinite(reward)
     assert "straight_line" in info["reward_terms"]
     assert "lateral_velocity_penalty" in info["reward_terms"]
+    assert "heading" in info["reward_terms"]
+    assert "yaw_rate_penalty" in info["reward_terms"]
     assert "lateral_displacement" in info
+    assert "heading_error" in info
+    assert "base_yaw" in info
+    assert "yaw_rate" in info
 
 
 def test_rl_env_random_actions_short_rollout_do_not_crash() -> None:
@@ -109,6 +114,26 @@ def test_rl_env_straight_line_reward_penalizes_sideways_drift() -> None:
     assert drifted_info["reward_terms"]["lateral_velocity_penalty"] < centered_info[
         "reward_terms"
     ]["lateral_velocity_penalty"]
+
+
+def test_rl_env_heading_reward_penalizes_yaw_error_and_yaw_rate() -> None:
+    env = Go1TrotRLEnv(Go1RLEnvConfig(decimation=1))
+    action = np.zeros(N_ACTUATORS, dtype=np.float32)
+
+    env.reset(seed=123)
+    _, _, _, _, centered_info = env.step(action)
+
+    env.reset(seed=123)
+    half_yaw = np.pi / 4.0
+    env.data.qpos[3:7] = np.array([np.cos(half_yaw), 0.0, 0.0, np.sin(half_yaw)])
+    env.data.qvel[5] = 1.0
+    mujoco.mj_forward(env.model, env.data)
+    _, _, _, _, yawed_info = env.step(action)
+
+    assert yawed_info["reward_terms"]["heading"] < centered_info["reward_terms"]["heading"]
+    assert yawed_info["reward_terms"]["yaw_rate_penalty"] < centered_info["reward_terms"][
+        "yaw_rate_penalty"
+    ]
 
 
 def test_rl_env_reset_randomization_is_seeded_and_in_bounds() -> None:

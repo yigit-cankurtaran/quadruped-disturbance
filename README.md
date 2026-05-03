@@ -60,6 +60,7 @@ The observation is compact and explicit:
 
 - base height
 - lateral displacement from the episode start line
+- heading error sin/cos relative to world +X
 - projected gravity in the body frame
 - freejoint root velocity
 - 12 actuated joint positions
@@ -68,10 +69,10 @@ The observation is compact and explicit:
 - gait phase sin/cos
 - desired forward command velocity
 
-Rewards include forward velocity tracking, straight-line tracking, alive/upright and
-height terms, plus roll/pitch, lateral velocity, action magnitude, action rate, and
-actuator energy penalties. Episodes terminate on low body height or excessive
-roll/pitch, and truncate at the configured episode time.
+Rewards include forward velocity tracking, straight-line tracking, heading alignment,
+alive/upright and height terms, plus roll/pitch, lateral velocity, yaw rate, action
+magnitude, action rate, and actuator energy penalties. Episodes terminate on low body
+height or excessive roll/pitch, and truncate at the configured episode time.
 
 Random push disturbances are available through "RandomPushConfig" for training or
 evaluation. The original visual demo push behavior remains in "run_controller".

@@ -5,7 +5,7 @@ import numpy as np
 from quadruped_demo.controllers import StandingController, TrotController
 from quadruped_demo.env import Go1Env
 from quadruped_demo.gait import N_ACTUATORS
-from quadruped_demo.metrics import base_roll_pitch, is_upright
+from quadruped_demo.metrics import base_roll_pitch, base_yaw, is_upright, wrap_angle
 
 
 def test_model_loads_and_home_stands() -> None:
@@ -48,3 +48,20 @@ def test_base_roll_pitch_from_identity_quaternion() -> None:
     roll, pitch = base_roll_pitch(env.data.qpos)
     assert np.isclose(roll, 0.0)
     assert np.isclose(pitch, 0.0)
+
+
+def test_base_yaw_from_identity_and_yaw_quaternion() -> None:
+    env = Go1Env()
+    qpos = env.data.qpos.copy()
+
+    assert np.isclose(base_yaw(qpos), 0.0)
+
+    half_yaw = np.pi / 4.0
+    qpos[3:7] = np.array([np.cos(half_yaw), 0.0, 0.0, np.sin(half_yaw)])
+    assert np.isclose(base_yaw(qpos), np.pi / 2.0)
+
+
+def test_wrap_angle_maps_to_signed_pi_range() -> None:
+    assert np.isclose(wrap_angle(0.0), 0.0)
+    assert np.isclose(wrap_angle(3.0 * np.pi / 2.0), -np.pi / 2.0)
+    assert np.isclose(wrap_angle(-3.0 * np.pi / 2.0), np.pi / 2.0)
