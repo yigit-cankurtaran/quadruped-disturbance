@@ -8,9 +8,17 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, VecEnv, VecNormalize
 
+from quadruped_demo.env import (
+    FOLLOW_CAMERA_NAME,
+    fixed_camera_id,
+    set_fixed_camera,
+    set_tracking_camera,
+)
 from quadruped_demo.paths import RESULTS_DIR
 from quadruped_demo.training import default_training_env_config, load_eval_vec_env
 from quadruped_demo.viewer_markers import draw_push_arrow
+
+FREE_CAMERA_NAME = "free"
 
 
 def _go1_env_from_vec_env(vec_env: VecEnv):
@@ -51,6 +59,30 @@ def companion_vecnormalize_path(model_path: Path) -> Path | None:
     return None
 
 
+def viewer_camera_id(model, camera_name: str) -> int | None:
+    if camera_name in {FREE_CAMERA_NAME, FOLLOW_CAMERA_NAME}:
+        return None
+    return fixed_camera_id(model, camera_name)
+
+
+def configure_viewer_camera(
+    camera,
+    go1_env,
+    camera_name: str,
+    fixed_id: int | None = None,
+) -> int | None:
+    if camera_name == FREE_CAMERA_NAME:
+        return None
+    if camera_name == FOLLOW_CAMERA_NAME:
+        trunk_id = go1_env.physics.trunk_id
+        set_tracking_camera(camera, trunk_id, lookat=go1_env.data.xipos[trunk_id])
+        return None
+
+    camera_id = fixed_id if fixed_id is not None else fixed_camera_id(go1_env.model, camera_name)
+    set_fixed_camera(camera, camera_id)
+    return camera_id
+
+
 def main() -> None:
     default_run_dir = RESULTS_DIR / "ppo" / "go1_ppo"
     default_model_path, _ = default_policy_paths(default_run_dir)
@@ -62,6 +94,15 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--no-viewer", action="store_true", help="Run headlessly for smoke tests.")
+    parser.add_argument(
+        "--camera",
+        default=FOLLOW_CAMERA_NAME,
+        help=(
+            f"MuJoCo viewer camera to use. Defaults to {FOLLOW_CAMERA_NAME!r}; "
+            f"use {FREE_CAMERA_NAME!r} for MuJoCo's interactive free camera, or pass "
+            "a fixed camera name from the model."
+        ),
+    )
     parser.add_argument(
         "--pushes",
         action="store_true",
@@ -88,10 +129,15 @@ def main() -> None:
     go1_env = _go1_env_from_vec_env(vec_env)
 
     viewer = None
+    camera_id = None
+    if not args.no_viewer:
+        camera_id = viewer_camera_id(go1_env.model, args.camera)
+
     if not args.no_viewer:
         import mujoco.viewer
 
         viewer = mujoco.viewer.launch_passive(go1_env.model, go1_env.data)
+        configure_viewer_camera(viewer.cam, go1_env, args.camera, camera_id)
 
     total_reward = 0.0
     total_time = 0.0

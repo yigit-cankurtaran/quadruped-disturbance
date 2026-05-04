@@ -3,6 +3,11 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import mujoco
+
+from quadruped_demo.env import FOLLOW_CAMERA_NAME
+from quadruped_demo.rl_env import Go1TrotRLEnv
+
 WATCH_PPO_PATH = Path(__file__).resolve().parents[1] / "scripts" / "watch_ppo.py"
 WATCH_PPO_SPEC = importlib.util.spec_from_file_location("watch_ppo", WATCH_PPO_PATH)
 assert WATCH_PPO_SPEC is not None
@@ -50,3 +55,51 @@ def test_watch_companion_vecnormalize_paths() -> None:
     assert watch_ppo.companion_vecnormalize_path(
         Path("run/checkpoints/ppo_go1_50000_steps.zip")
     ) == Path("run/checkpoints/ppo_go1_vecnormalize_50000_steps.pkl")
+
+
+def test_watch_configures_follow_camera_by_default() -> None:
+    env = Go1TrotRLEnv()
+    viewer_camera = mujoco.MjvCamera()
+
+    try:
+        camera_id = watch_ppo.configure_viewer_camera(
+            viewer_camera,
+            env,
+            watch_ppo.FOLLOW_CAMERA_NAME,
+        )
+    finally:
+        env.close()
+
+    assert watch_ppo.FOLLOW_CAMERA_NAME == FOLLOW_CAMERA_NAME
+    assert camera_id is None
+    assert viewer_camera.type == int(mujoco.mjtCamera.mjCAMERA_TRACKING)
+    assert viewer_camera.trackbodyid == env.physics.trunk_id
+
+
+def test_watch_free_camera_leaves_viewer_camera_interactive() -> None:
+    env = Go1TrotRLEnv()
+
+    try:
+        assert watch_ppo.viewer_camera_id(env.model, watch_ppo.FREE_CAMERA_NAME) is None
+    finally:
+        env.close()
+
+
+def test_watch_can_select_named_fixed_model_camera() -> None:
+    env = Go1TrotRLEnv()
+    viewer_camera = mujoco.MjvCamera()
+    fixed_id = mujoco.mj_name2id(env.model, mujoco.mjtObj.mjOBJ_CAMERA, "tracking")
+
+    try:
+        camera_id = watch_ppo.configure_viewer_camera(
+            viewer_camera,
+            env,
+            "tracking",
+            fixed_id,
+        )
+    finally:
+        env.close()
+
+    assert camera_id == fixed_id
+    assert viewer_camera.type == int(mujoco.mjtCamera.mjCAMERA_FIXED)
+    assert viewer_camera.fixedcamid == fixed_id

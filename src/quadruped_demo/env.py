@@ -10,6 +10,10 @@ import numpy as np
 from quadruped_demo.paths import require_model
 
 Controller = Callable[[float, dict[str, np.ndarray]], np.ndarray]
+FOLLOW_CAMERA_NAME = "follow"
+FOLLOW_CAMERA_DISTANCE = 2.1
+FOLLOW_CAMERA_AZIMUTH = 120.0
+FOLLOW_CAMERA_ELEVATION = -18.0
 
 
 @dataclass  # using dataclass because it just needs to hold data
@@ -64,6 +68,42 @@ class Go1Env:
 
     def clear_push(self) -> None:
         self.data.xfrc_applied[self.trunk_id, :] = 0.0
+
+
+def fixed_camera_id(model: mujoco.MjModel, camera_name: str) -> int:
+    camera_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, camera_name)
+    if camera_id < 0:
+        raise ValueError(f"Unknown MuJoCo camera {camera_name!r}.")
+    return camera_id
+
+
+def set_fixed_camera(camera: mujoco.MjvCamera, camera_id: int) -> None:
+    camera.type = mujoco.mjtCamera.mjCAMERA_FIXED
+    camera.fixedcamid = camera_id
+
+
+def set_tracking_camera(
+    camera: mujoco.MjvCamera,
+    track_body_id: int,
+    *,
+    lookat: np.ndarray | None = None,
+    distance: float = FOLLOW_CAMERA_DISTANCE,
+    azimuth: float = FOLLOW_CAMERA_AZIMUTH,
+    elevation: float = FOLLOW_CAMERA_ELEVATION,
+) -> None:
+    camera.type = mujoco.mjtCamera.mjCAMERA_TRACKING
+    camera.trackbodyid = track_body_id
+    camera.distance = distance
+    camera.azimuth = azimuth
+    camera.elevation = elevation
+    if lookat is not None:
+        camera.lookat[:] = lookat
+
+
+def use_fixed_camera(model: mujoco.MjModel, camera: mujoco.MjvCamera, camera_name: str) -> int:
+    camera_id = fixed_camera_id(model, camera_name)
+    set_fixed_camera(camera, camera_id)
+    return camera_id
 
 
 def run_controller(
