@@ -9,6 +9,12 @@ build on the same simulator.
 
 ## Visual Demos
 
+<video src="https://raw.githubusercontent.com/yigit-cankurtaran/quadruped-disturbance/main/assets/demo/quadruped-demo.mp4" controls muted playsinline width="720" poster="assets/demo/quadruped-demo-poster.jpg"></video>
+
+[![Quadruped demo video](assets/demo/quadruped-demo-poster.jpg)](assets/demo/quadruped-demo.mp4)
+
+Red circles on the robot show where the pushes happen.
+
 Run the existing scripted controllers:
 
 ```bash
