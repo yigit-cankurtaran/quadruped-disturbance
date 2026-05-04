@@ -13,8 +13,6 @@ build on the same simulator.
 
 Red circles on the robot show where the pushes happen.
 
-[Watch the higher-quality MP4 demo.](assets/demo/quadruped-demo.mp4)
-
 Run the existing scripted controllers:
 
 ```bash
