@@ -42,6 +42,41 @@ def test_watch_defaults_prefer_best_model_when_present(tmp_path) -> None:
     assert vecnormalize_path == best_vecnormalize
 
 
+def test_watch_defaults_use_latest_timestamped_run(tmp_path) -> None:
+    run_root = tmp_path / "go1_ppo"
+    old_run = run_root / "20260503-120000"
+    latest_run = run_root / "20260504-120000"
+    old_run.mkdir(parents=True)
+    (old_run / "model.zip").touch()
+    (old_run / "vecnormalize.pkl").touch()
+
+    latest_best = latest_run / "best"
+    latest_best.mkdir(parents=True)
+    latest_model = latest_best / "best_model.zip"
+    latest_vecnormalize = latest_best / "best_vecnormalize.pkl"
+    latest_model.touch()
+    latest_vecnormalize.touch()
+
+    model_path, vecnormalize_path = watch_ppo.default_policy_paths(run_root)
+
+    assert model_path == latest_model
+    assert vecnormalize_path == latest_vecnormalize
+
+
+def test_watch_defaults_fall_back_to_flat_run_dir(tmp_path) -> None:
+    run_root = tmp_path / "go1_ppo"
+    run_root.mkdir()
+    final_model = run_root / "model.zip"
+    final_vecnormalize = run_root / "vecnormalize.pkl"
+    final_model.touch()
+    final_vecnormalize.touch()
+
+    model_path, vecnormalize_path = watch_ppo.default_policy_paths(run_root)
+
+    assert model_path == final_model
+    assert vecnormalize_path == final_vecnormalize
+
+
 def test_watch_companion_vecnormalize_paths() -> None:
     assert watch_ppo.companion_vecnormalize_path(
         Path("run/best/best_model.zip")

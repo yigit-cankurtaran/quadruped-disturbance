@@ -110,18 +110,24 @@ env. Use `--vec-env dummy` to force simpler single-process stepping. A short smo
 uv run python scripts/train_ppo.py --total-timesteps 1024 --n-steps 128 --batch-size 64
 ```
 
-The default output directory is `results/ppo/go1_ppo/` and contains:
+The default output directory is `results/ppo/go1_ppo/<timestamp>/`, where
+`<timestamp>` uses the `YYYYMMDD-HHMMSS` format and may get a numeric suffix if
+needed to avoid a collision. Each run directory contains:
 
 - `model.zip` and `vecnormalize.pkl` for the final completed model
 - `best/best_model.zip` and `best/best_vecnormalize.pkl` from periodic evaluation
 - `checkpoints/` for periodic model and VecNormalize snapshots
 - monitor logs
 
+Use `--run-id NAME` to choose the run folder name, or `--flat-run-dir` to use the
+legacy `results/ppo/go1_ppo/` layout.
+
 If training is interrupted with Ctrl-C, `interrupted_model.zip` and
 `interrupted_vecnormalize.pkl` are saved before the script exits.
 
-Watch the default trained checkpoint. The script uses `best/best_model.zip` when it
-exists and falls back to the final `model.zip` otherwise:
+Watch the newest trained checkpoint. The script selects the latest timestamped run,
+uses `best/best_model.zip` when it exists, and falls back to the final `model.zip`
+otherwise:
 
 ```bash
 uv run mjpython scripts/watch_ppo.py
@@ -138,8 +144,8 @@ Evaluate a trained checkpoint headlessly:
 
 ```bash
 uv run python scripts/evaluate_ppo.py \
-  --model results/ppo/go1_ppo/model.zip \
-  --vecnormalize results/ppo/go1_ppo/vecnormalize.pkl \
+  --model results/ppo/go1_ppo/YYYYMMDD-HHMMSS/model.zip \
+  --vecnormalize results/ppo/go1_ppo/YYYYMMDD-HHMMSS/vecnormalize.pkl \
   --duration 5 \
   --no-viewer
 ```
@@ -148,11 +154,12 @@ For visual evaluation, use `mjpython` and omit `--no-viewer`:
 
 ```bash
 uv run mjpython scripts/evaluate_ppo.py \
-  --model results/ppo/go1_ppo/model.zip \
-  --vecnormalize results/ppo/go1_ppo/vecnormalize.pkl
+  --model results/ppo/go1_ppo/YYYYMMDD-HHMMSS/model.zip \
+  --vecnormalize results/ppo/go1_ppo/YYYYMMDD-HHMMSS/vecnormalize.pkl
 ```
 
-Add `--pushes` to train or evaluate with randomized push disturbances.
+Add `--pushes` to train or evaluate with push disturbances. Training uses randomized
+pushes, while evaluation uses fixed pushes so results are comparable across runs.
 
 ## Development
 

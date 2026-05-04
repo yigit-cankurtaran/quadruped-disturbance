@@ -36,6 +36,7 @@ def test_rl_env_step_returns_gymnasium_tuple() -> None:
     assert isinstance(truncated, bool)
     assert "reward_terms" in info
     assert np.isfinite(reward)
+    assert "x_position" in info
     assert "straight_line" in info["reward_terms"]
     assert "lateral_velocity_penalty" in info["reward_terms"]
     assert "heading" in info["reward_terms"]

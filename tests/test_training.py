@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecEnv, VecNormalize
 
@@ -10,6 +11,7 @@ from quadruped_demo.training import (
     build_vec_env,
     default_training_env_config,
     load_eval_vec_env,
+    resolve_run_dir,
     train_ppo,
 )
 
@@ -52,6 +54,27 @@ def test_build_vec_env_auto_uses_subproc_for_multiple_envs() -> None:
         vec_env.close()
 
 
+def test_resolve_run_dir_uses_timestamped_run_id(tmp_path) -> None:
+    config = PPOTrainingConfig(run_name="go1_ppo", run_id="20260504-172500")
+
+    assert resolve_run_dir(config, output_dir=tmp_path) == (
+        tmp_path / "go1_ppo" / "20260504-172500"
+    )
+
+
+def test_resolve_run_dir_can_use_legacy_flat_layout(tmp_path) -> None:
+    config = PPOTrainingConfig(run_name="go1_ppo", timestamped_runs=False)
+
+    assert resolve_run_dir(config, output_dir=tmp_path) == tmp_path / "go1_ppo"
+
+
+def test_resolve_run_dir_rejects_nested_run_id(tmp_path) -> None:
+    config = PPOTrainingConfig(run_name="go1_ppo", run_id="../bad")
+
+    with pytest.raises(ValueError):
+        resolve_run_dir(config, output_dir=tmp_path)
+
+
 def test_tiny_ppo_training_saves_model_and_normalizer(tmp_path) -> None:
     env_config = Go1RLEnvConfig(max_episode_time_s=0.2)
     result = train_ppo(
@@ -63,6 +86,7 @@ def test_tiny_ppo_training_saves_model_and_normalizer(tmp_path) -> None:
             n_epochs=1,
             verbose=0,
             run_name="ppo_smoke",
+            run_id="test-run",
             checkpoint_freq=4,
             eval_freq=4,
             n_eval_episodes=1,
@@ -72,6 +96,7 @@ def test_tiny_ppo_training_saves_model_and_normalizer(tmp_path) -> None:
         output_dir=tmp_path,
     )
 
+    assert result.run_dir == tmp_path / "ppo_smoke" / "test-run"
     assert result.model_path.exists()
     assert result.vecnormalize_path is not None
     assert result.vecnormalize_path.exists()

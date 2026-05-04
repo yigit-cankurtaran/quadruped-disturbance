@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import time
+from datetime import datetime
 from pathlib import Path
 
 from stable_baselines3 import PPO
@@ -15,10 +16,11 @@ from quadruped_demo.env import (
     set_tracking_camera,
 )
 from quadruped_demo.paths import RESULTS_DIR
-from quadruped_demo.training import default_training_env_config, load_eval_vec_env
+from quadruped_demo.training import default_eval_env_config, load_eval_vec_env
 from quadruped_demo.viewer_markers import draw_push_arrow
 
 FREE_CAMERA_NAME = "free"
+RUN_ID_TIMESTAMP_FORMAT = "%Y%m%d-%H%M%S"
 
 
 def _go1_env_from_vec_env(vec_env: VecEnv):
@@ -31,7 +33,45 @@ def _go1_env_from_vec_env(vec_env: VecEnv):
     return monitor_env.unwrapped
 
 
-def default_policy_paths(run_dir: Path) -> tuple[Path, Path | None]:
+def _has_policy_artifact(run_dir: Path) -> bool:
+    return (run_dir / "model.zip").exists() or (run_dir / "best" / "best_model.zip").exists()
+
+
+def _timestamped_run_key(run_dir: Path) -> tuple[datetime, int] | None:
+    timestamp = run_dir.name[:15]
+    try:
+        parsed = datetime.strptime(timestamp, RUN_ID_TIMESTAMP_FORMAT)
+    except ValueError:
+        return None
+
+    suffix = run_dir.name[15:]
+    if not suffix:
+        return parsed, 0
+    if suffix.startswith("-") and suffix[1:].isdigit():
+        return parsed, int(suffix[1:])
+    return None
+
+
+def latest_run_dir(run_root: Path) -> Path | None:
+    if not run_root.exists():
+        return None
+
+    candidates = [
+        child
+        for child in run_root.iterdir()
+        if (
+            child.is_dir()
+            and _timestamped_run_key(child) is not None
+            and _has_policy_artifact(child)
+        )
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda path: _timestamped_run_key(path) or (datetime.min, -1))
+
+
+def default_policy_paths(run_root: Path) -> tuple[Path, Path | None]:
+    run_dir = latest_run_dir(run_root) or run_root
     best_model = run_dir / "best" / "best_model.zip"
     best_vecnormalize = run_dir / "best" / "best_vecnormalize.pkl"
     if best_model.exists():
@@ -84,8 +124,8 @@ def configure_viewer_camera(
 
 
 def main() -> None:
-    default_run_dir = RESULTS_DIR / "ppo" / "go1_ppo"
-    default_model_path, _ = default_policy_paths(default_run_dir)
+    default_run_root = RESULTS_DIR / "ppo" / "go1_ppo"
+    default_model_path, _ = default_policy_paths(default_run_root)
 
     parser = argparse.ArgumentParser(description="Watch a trained PPO Go1 residual policy.")
     parser.add_argument("--model", type=Path, default=default_model_path)
@@ -120,11 +160,11 @@ def main() -> None:
         vecnormalize_path = None
 
     vec_env = load_eval_vec_env(
-        default_training_env_config(pushes=args.pushes),
+        default_eval_env_config(pushes=args.pushes),
         seed=args.seed,
         vecnormalize_path=vecnormalize_path,
     )
-    model = PPO.load(str(args.model), env=vec_env, device=args.device)
+    model = PPO.load(str(args.model), device=args.device)
     obs = vec_env.reset()
     go1_env = _go1_env_from_vec_env(vec_env)
 
@@ -142,11 +182,16 @@ def main() -> None:
     total_reward = 0.0
     total_time = 0.0
     episodes = 1
+    last_info = {
+        "x_position": float(go1_env.data.qpos[0]),
+        "base_height": float(go1_env.data.qpos[2]),
+    }
     start = time.time()
     try:
         while total_time < args.duration:
             action, _ = model.predict(obs, deterministic=True)
             obs, rewards, dones, infos = vec_env.step(action)
+            last_info = infos[0]
             total_reward += float(rewards[0])
             total_time += go1_env.dt
 
@@ -169,10 +214,9 @@ def main() -> None:
             viewer.close()
         vec_env.close()
 
-    info = infos[0]
     print(
         f"final_time={total_time:.2f}s episodes={episodes} "
-        f"x={go1_env.data.qpos[0]:.3f}m height={info['base_height']:.3f}m "
+        f"x={last_info['x_position']:.3f}m height={last_info['base_height']:.3f}m "
         f"total_reward={total_reward:.3f}"
     )
 

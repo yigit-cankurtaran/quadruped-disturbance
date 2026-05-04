@@ -25,6 +25,16 @@ def main() -> None:
     parser.add_argument("--n-eval-episodes", type=int, default=5)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--run-name", default="go1_ppo")
+    parser.add_argument(
+        "--run-id",
+        default=None,
+        help="Override the timestamped run folder name under the run name.",
+    )
+    parser.add_argument(
+        "--flat-run-dir",
+        action="store_true",
+        help="Use the legacy results/ppo/<run-name> layout instead of a timestamped run folder.",
+    )
     parser.add_argument("--output-dir", type=Path, default=RESULTS_DIR / "ppo")
     parser.add_argument(
         "--vec-env",
@@ -51,6 +61,8 @@ def main() -> None:
             device=args.device,
             normalize=not args.no_normalize,
             run_name=args.run_name,
+            run_id=args.run_id,
+            timestamped_runs=not args.flat_run_dir,
             vec_env_type=args.vec_env,
             checkpoint_freq=args.checkpoint_freq,
             eval_freq=args.eval_freq,

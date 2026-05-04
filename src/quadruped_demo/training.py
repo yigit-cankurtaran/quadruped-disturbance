@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -45,6 +46,8 @@ class PPOTrainingConfig:
     normalize: bool = True
     verbose: int = 1
     run_name: str = "go1_ppo"
+    run_id: str | None = None
+    timestamped_runs: bool = True
     vec_env_type: VecEnvType = "auto"
     checkpoint_freq: int = 50_000
     eval_freq: int = 10_000
@@ -235,6 +238,40 @@ def _callback_freq(freq_timesteps: int, n_envs: int) -> int:
     return max(freq_timesteps // max(n_envs, 1), 1)
 
 
+def _timestamp_run_id() -> str:
+    return datetime.now().strftime("%Y%m%d-%H%M%S")
+
+
+def _validate_run_id(run_id: str) -> str:
+    if not run_id or Path(run_id).name != run_id or run_id in {".", ".."}:
+        raise ValueError("run_id must be a non-empty single path component")
+    return run_id
+
+
+def _next_available_run_dir(run_root: Path, run_id: str) -> Path:
+    candidate = run_root / run_id
+    if not candidate.exists():
+        return candidate
+
+    suffix = 1
+    while True:
+        candidate = run_root / f"{run_id}-{suffix:02d}"
+        if not candidate.exists():
+            return candidate
+        suffix += 1
+
+
+def resolve_run_dir(config: PPOTrainingConfig, output_dir: Path | None = None) -> Path:
+    run_root = (output_dir or RESULTS_DIR / "ppo") / config.run_name
+    if not config.timestamped_runs:
+        return run_root
+
+    if config.run_id is not None:
+        return run_root / _validate_run_id(config.run_id)
+
+    return _next_available_run_dir(run_root, _timestamp_run_id())
+
+
 def build_training_callbacks(
     config: PPOTrainingConfig,
     env_config: Go1RLEnvConfig,
@@ -309,9 +346,9 @@ def train_ppo(
     if config.batch_size < 2:
         raise ValueError("batch_size must be >= 2")
 
-    run_dir = (output_dir or RESULTS_DIR / "ppo") / config.run_name
+    run_dir = resolve_run_dir(config, output_dir)
     monitor_dir = run_dir / "monitor"
-    run_dir.mkdir(parents=True, exist_ok=True)
+    run_dir.mkdir(parents=True, exist_ok=not config.timestamped_runs)
     resolved_env_config = env_config or default_training_env_config()
 
     vec_env = build_vec_env(

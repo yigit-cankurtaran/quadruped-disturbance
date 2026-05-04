@@ -526,6 +526,7 @@ class Go1TrotRLEnv(gym.Env[np.ndarray, np.ndarray]):
         yaw = base_yaw(self.data.qpos)
         return {
             "time": float(self.data.time),
+            "x_position": float(self.data.qpos[0]),
             "command_velocity_x": self._command_velocity_x,
             "forward_velocity": float(self.data.qvel[0]),
             "lateral_velocity": float(self.data.qvel[1]),
